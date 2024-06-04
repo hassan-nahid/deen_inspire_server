@@ -3,12 +3,32 @@ const express = require("express");
 const app = express();
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const cors = require("cors");
+const jwt = require("jsonwebtoken");
 const port = process.env.PORT;
 
 app.use(cors());
 app.use(express.json());
 
+const createToken = (user) => {
+  const token = jwt.sign(
+    {
+      uid: user?.uid,
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: "7d" }
+  );
+  return token;
+}
 
+const verifyToken = (req, res, next) => {
+  const token = req.headers.authorization.split(" ")[1];
+  const verify = jwt.verify(token, process.env.JWT_SECRET);
+  if (!verify?.uid) {
+    return res.send("You are not authorized");
+  }
+  req.user = verify.uid;
+  next();
+}
 
 const uri = process.env.MONGODB_URL
 
@@ -27,10 +47,11 @@ async function run() {
 
     const database = client.db("Deen_Inspire");
     const postCollection = database.collection("postCollection");
+    const userCollection = database.collection("userCollection");
 
     //post api here 
 
-    app.post("/posts", async (req, res) => {
+    app.post("/posts", verifyToken, async (req, res) => {
       const postData = req.body
       const result = await postCollection.insertOne(postData)
       res.send(result)
@@ -58,7 +79,7 @@ async function run() {
       res.send(result)
     })
 
-    app.patch("/edit_post/:id", async (req, res) => {
+    app.patch("/edit_post/:id", verifyToken, async (req, res) => {
       const id = req.params.id
       const postData = req.body
       const result = await postCollection.updateOne(
@@ -68,13 +89,34 @@ async function run() {
       res.send(result)
     })
 
-    app.delete("/posts/:id", async (req, res) => {
+    app.delete("/posts/:id", verifyToken, async (req, res) => {
       const id = req.params.id
       const result = await postCollection.deleteOne(
         { _id: new ObjectId(id) },
       )
       res.send(result)
     })
+
+    // user data 
+
+    app.post("/user", async (req, res) => {
+      const user = req.body;
+
+      const token = createToken(user)
+      const isUserExist = await userCollection.findOne({ uid: user?.uid });
+      if (isUserExist?._id) {
+        return res.send({
+          status: "success",
+          message: "Login success",
+          token
+        });
+      }
+      await userCollection.insertOne(user);
+      return res.send({ token });
+    });
+
+
+
 
 
     await client.db("admin").command({ ping: 1 });
